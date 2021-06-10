@@ -1,0 +1,4 @@
+*.tfstate
+.terraform
+variables.tfvars
+.DS_Store

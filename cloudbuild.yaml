@@ -1,0 +1,69 @@
+#
+# User-defined substitutions:
+#   _NEXUS_USERNAME
+#   _NEXUS_PASSWORD
+#   _CLOUDSDK_COMPUTE_ZONE
+#   g
+#
+
+steps:
+- id: 'run quality test'
+  name: "golangci/golangci-lint"
+  args: ["golangci-lint","run"]
+
+- id: 'run unit test'
+  name: 'gcr.io/cloud-builders/go'
+  args: ['test', 'app']
+  env: ['GOPATH=.']
+
+- id: 'run security checks'
+  name: "securego/gosec"
+  args: ['app']
+  env: ['GOPATH=.']
+
+- id: 'build image'
+  name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'registry.serverlessmovies.com/mlabouardy/app:$SHORT_SHA', '.']
+
+- id: 'login to nexus'
+  name: 'gcr.io/cloud-builders/docker'
+  args: ['login', 'registry.serverlessmovies.com', '-u', '${_NEXUS_USERNAME}', '-p', '${_NEXUS_PASSWORD}']
+
+- id: 'tag image'
+  name: 'gcr.io/cloud-builders/docker'
+  args: ['tag', 'registry.serverlessmovies.com/mlabouardy/app:$SHORT_SHA', 'registry.serverlessmovies.com/mlabouardy/app:latest']
+
+- id: 'push image'
+  name: 'gcr.io/cloud-builders/docker'
+  args: ['push', 'registry.serverlessmovies.com/mlabouardy/app:$SHORT_SHA']
+
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['push', 'registry.serverlessmovies.com/mlabouardy/app:latest']
+
+- id: 'configure kubectl'
+  name: 'gcr.io/cloud-builders/gcloud'
+  env:
+    - 'CLOUDSDK_COMPUTE_ZONE=${_CLOUDSDK_COMPUTE_ZONE}'
+    - 'CLOUDSDK_CONTAINER_CLUSTER=${_CLOUDSDK_CONTAINER_CLUSTER}'
+    - 'KUBECONFIG=/kube/config'
+  entrypoint: 'sh'
+  args:
+    - '-c'
+    - |
+      gcloud container clusters get-credentials "$${CLOUDSDK_CONTAINER_CLUSTER}" --zone "$${CLOUDSDK_COMPUTE_ZONE}"
+  volumes:
+    - name: 'kube'
+      path: /kube
+
+- id: 'deploy to k8s'
+  name: 'gcr.io/cloud-builders/gcloud'
+  env:
+    - 'KUBECONFIG=/kube/config'
+  entrypoint: 'sh'
+  args:
+    - '-c'
+    - |
+      kubectl set image deployment/app app=registry.serverlessmovies.com/mlabouardy/app:$SHORT_SHA
+  volumes:
+    - name: 'kube'
+      path: /kube
